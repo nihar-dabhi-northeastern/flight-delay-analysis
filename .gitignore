@@ -1,0 +1,19 @@
+# IntelliJ
+.idea/
+*.iml
+
+# sbt compiled files
+target/
+project/target/
+project/project/
+
+# Mac files
+.DS_Store
+
+# Auto-generated folders
+checkpoints/
+output/
+model/
+
+# Logs
+*.log
