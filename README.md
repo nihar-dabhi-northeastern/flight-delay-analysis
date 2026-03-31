@@ -90,21 +90,3 @@ sbt test
 ```
 
 ---
-
-## ML Model Results
-| Metric | Value |
-|--------|-------|
-| Model | Random Forest (100 trees) |
-| MAE | ~8-11 minutes |
-| R² Score | ~0.85-0.90 |
-| Top Feature | DepDelay |
-
----
-
-## Acceptance Criteria
-1. Kafka producer publishes BTS records at ~100 events/sec
-2. Spark Streaming processes events with under 10 seconds latency
-3. Window aggregations compute correct avg delay per carrier and airport
-4. Random Forest achieves R² > 0.80 on test set
-5. All domain models use Option — no null values
-6. Core transformation logic covered by unit tests
