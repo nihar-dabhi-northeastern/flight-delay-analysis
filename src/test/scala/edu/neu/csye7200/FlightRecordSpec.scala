@@ -41,7 +41,29 @@ class FlightRecordSpec extends AnyFlatSpec with Matchers {
     "0.00", "170.00", "0.00", "0.00", "0.00"
   )
 
-  // --- Parsing tests ---
+  val whitespaceRow: Array[String] = Array(
+    " 12 ", " 1 ", " 12/2/2024 12:00:00 AM ", " UA ", " 100 ",
+    " BOS ", " Boston, MA ", " MA ",
+    " LAX ", " Los Angeles, CA ", " CA ",
+    " 0600 ", " 0605 ", " 5.00 ", " 0.00 ",
+    " 0900 ", " 0910 ", " 10.00 ", " 0.00 ",
+    " 0.00 ", " ", " 2704.00 ",
+    " 0.00 ", " 0.00 ", " 0.00 ", " 0.00 ", " 0.00 "
+  )
+
+  val allEmptyDelaysRow: Array[String] = Array(
+    "12", "5", "12/5/2024 12:00:00 AM", "WN", "200",
+    "DAL", "Dallas, TX", "TX",
+    "HOU", "Houston, TX", "TX",
+    "0700", "0655", "-5.00", "0.00",
+    "0800", "0750", "-10.00", "0.00",
+    "0.00", "", "239.00",
+    "", "", "", "", ""
+  )
+
+  // ==========================================================================
+  // fromCSV parsing tests
+  // ==========================================================================
 
   "fromCSV" should "parse a valid row successfully" in {
     FlightRecord.fromCSV(validRow) shouldBe defined
@@ -49,6 +71,10 @@ class FlightRecordSpec extends AnyFlatSpec with Matchers {
 
   it should "return None for malformed row" in {
     FlightRecord.fromCSV(Array("bad", "data")) shouldBe None
+  }
+
+  it should "return None for empty array" in {
+    FlightRecord.fromCSV(Array.empty) shouldBe None
   }
 
   it should "parse carrier correctly" in {
@@ -67,6 +93,10 @@ class FlightRecordSpec extends AnyFlatSpec with Matchers {
     FlightRecord.fromCSV(validRow).flatMap(_.arrDelay) shouldBe Some(25.0)
   }
 
+  it should "parse depDelay as Some(15.0)" in {
+    FlightRecord.fromCSV(validRow).flatMap(_.depDelay) shouldBe Some(15.0)
+  }
+
   it should "parse cancelled = false for normal flight" in {
     FlightRecord.fromCSV(validRow).map(_.cancelled) shouldBe Some(false)
   }
@@ -77,6 +107,10 @@ class FlightRecordSpec extends AnyFlatSpec with Matchers {
 
   it should "parse cancellationCode as Some(B)" in {
     FlightRecord.fromCSV(cancelledRow).flatMap(_.cancellationCode) shouldBe Some("B")
+  }
+
+  it should "parse cancellationCode as None for non-cancelled flight" in {
+    FlightRecord.fromCSV(validRow).map(_.cancellationCode) shouldBe Some(None)
   }
 
   it should "parse depTime as None for cancelled flight" in {
@@ -99,7 +133,62 @@ class FlightRecordSpec extends AnyFlatSpec with Matchers {
     FlightRecord.fromCSV(validRow).map(_.dayOfWeek) shouldBe Some(1)
   }
 
-  // --- delayCategory boundary tests ---
+  it should "parse all cause delay fields as None when empty" in {
+    val r = FlightRecord.fromCSV(allEmptyDelaysRow).get
+    r.carrierDelay      shouldBe None
+    r.weatherDelay      shouldBe None
+    r.nasDelay          shouldBe None
+    r.securityDelay     shouldBe None
+    r.lateAircraftDelay shouldBe None
+  }
+
+  it should "handle extra whitespace in fields" in {
+    FlightRecord.fromCSV(whitespaceRow) shouldBe defined
+  }
+
+  it should "parse carrier correctly with whitespace" in {
+    FlightRecord.fromCSV(whitespaceRow).map(_.carrier) shouldBe Some("UA")
+  }
+
+  it should "parse negative depDelay correctly" in {
+    FlightRecord.fromCSV(allEmptyDelaysRow).flatMap(_.depDelay) shouldBe Some(-5.0)
+  }
+
+  it should "parse negative arrDelay correctly" in {
+    FlightRecord.fromCSV(allEmptyDelaysRow).flatMap(_.arrDelay) shouldBe Some(-10.0)
+  }
+
+  // ==========================================================================
+  // toJson tests (FlightProducer)
+  // ==========================================================================
+
+  "toJson" should "produce a non-empty JSON string" in {
+    val r    = FlightRecord.fromCSV(validRow).get
+    val json = edu.neu.csye7200.producer.FlightProducer.toJson(r)
+    json should not be empty
+  }
+
+  it should "contain carrier field" in {
+    val r    = FlightRecord.fromCSV(validRow).get
+    val json = edu.neu.csye7200.producer.FlightProducer.toJson(r)
+    json should include("AA")
+  }
+
+  it should "output 0.0 for None delay fields" in {
+    val r    = FlightRecord.fromCSV(cancelledRow).get
+    val json = edu.neu.csye7200.producer.FlightProducer.toJson(r)
+    json should include("\"carrierDelay\": 0.0")
+  }
+
+  it should "contain origin field" in {
+    val r    = FlightRecord.fromCSV(validRow).get
+    val json = edu.neu.csye7200.producer.FlightProducer.toJson(r)
+    json should include("JFK")
+  }
+
+  // ==========================================================================
+  // delayCategory boundary tests
+  // ==========================================================================
 
   "delayCategory" should "return OnTime for negative delay" in {
     FlightRecord.fromCSV(validRow).get.copy(arrDelay = Some(-5.0)).delayCategory shouldBe OnTime
@@ -145,7 +234,9 @@ class FlightRecordSpec extends AnyFlatSpec with Matchers {
     FlightRecord.fromCSV(validRow).get.copy(arrDelay = None).delayCategory shouldBe OnTime
   }
 
-  // --- isDelayed tests ---
+  // ==========================================================================
+  // isDelayed tests
+  // ==========================================================================
 
   "isDelayed" should "return true when arrDel15 = 1" in {
     val r = FlightRecord.fromCSV(validRow).get.copy(arrDel15 = Some(1))
@@ -156,7 +247,13 @@ class FlightRecordSpec extends AnyFlatSpec with Matchers {
     FlightRecord.fromCSV(validRow).get.copy(arrDel15 = Some(0)).isDelayed shouldBe false
   }
 
-  // --- totalCauseDelay tests ---
+  it should "return false when arrDel15 is None" in {
+    FlightRecord.fromCSV(validRow).get.copy(arrDel15 = None).isDelayed shouldBe false
+  }
+
+  // ==========================================================================
+  // totalCauseDelay tests
+  // ==========================================================================
 
   "totalCauseDelay" should "sum all delay causes correctly" in {
     val r = FlightRecord.fromCSV(validRow).get.copy(
@@ -171,5 +268,21 @@ class FlightRecordSpec extends AnyFlatSpec with Matchers {
 
   it should "return 0.0 when all delays are None" in {
     FlightRecord.fromCSV(cancelledRow).get.totalCauseDelay shouldBe 0.0
+  }
+
+  it should "handle partial cause delays" in {
+    val r = FlightRecord.fromCSV(validRow).get.copy(
+      carrierDelay      = Some(20.0),
+      weatherDelay      = None,
+      nasDelay          = Some(10.0),
+      securityDelay     = None,
+      lateAircraftDelay = None
+    )
+    r.totalCauseDelay shouldBe 30.0
+  }
+
+  it should "return correct sum for weather only delay" in {
+    val r = FlightRecord.fromCSV(severeRow).get
+    r.totalCauseDelay shouldBe 170.0
   }
 }
