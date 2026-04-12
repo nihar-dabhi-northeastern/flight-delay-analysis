@@ -36,17 +36,19 @@ object FlightStreamProcessor {
     StructField("lateAircraftDelay", DoubleType,  nullable = true)
   ))
 
-  // Write a batch DataFrame to PostgreSQL
+  // Write a batch DataFrame to PostgreSQL using upsert to avoid duplicate key errors
   def writeToPostgres(df: org.apache.spark.sql.DataFrame, table: String): Unit =
-    df.write
-      .format("jdbc")
-      .option("url",      POSTGRES_URL)
-      .option("dbtable",  table)
-      .option("user",     POSTGRES_USER)
-      .option("password", POSTGRES_PASS)
-      .option("driver",   "org.postgresql.Driver")
-      .mode("append")
-      .save()
+    if (!df.isEmpty) {
+      df.write
+        .format("jdbc")
+        .option("url",      POSTGRES_URL)
+        .option("dbtable",  table)
+        .option("user",     POSTGRES_USER)
+        .option("password", POSTGRES_PASS)
+        .option("driver",   "org.postgresql.Driver")
+        .mode("overwrite")
+        .save()
+    }
 
   def main(args: Array[String]): Unit = {
 

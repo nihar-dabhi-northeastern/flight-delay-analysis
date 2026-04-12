@@ -66,7 +66,8 @@ object FlightProducer {
         if (lines.hasNext) lines.next() // skip header
 
         for (line <- lines) {
-          val cols = line.split(",", -1)
+          val cols = line.split(",(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)", -1)
+            .map(_.replaceAll("\"", "").trim)
           FlightRecord.fromCSV(cols) match {
             case Some(flight) =>
               val key    = s"${flight.carrier}-${flight.flightNumber}-${flight.flightDate}"

@@ -63,7 +63,7 @@ case class FlightRecord(
 }
 
 object FlightRecord {
-  private val fmt = DateTimeFormatter.ofPattern("yyyyMMdd")
+  private val fmt = DateTimeFormatter.ofPattern("M/d/yyyy hh:mm:ss a")
 
   private def toDouble(s: String): Option[Double] =
     s.trim match {
@@ -78,12 +78,17 @@ object FlightRecord {
     }
 
   // Parse one CSV row into FlightRecord — returns None if row is malformed
+  // Column order matches BTS CSV: MONTH,DAY_OF_WEEK,FL_DATE,OP_UNIQUE_CARRIER,
+  // OP_CARRIER_FL_NUM,ORIGIN,ORIGIN_CITY_NAME,ORIGIN_STATE_ABR,DEST,DEST_CITY_NAME,
+  // DEST_STATE_ABR,CRS_DEP_TIME,DEP_TIME,DEP_DELAY,DEP_DEL15,CRS_ARR_TIME,ARR_TIME,
+  // ARR_DELAY,ARR_DEL15,CANCELLED,CANCELLATION_CODE,DISTANCE,CARRIER_DELAY,
+  // WEATHER_DELAY,NAS_DELAY,SECURITY_DELAY,LATE_AIRCRAFT_DELAY
   def fromCSV(cols: Array[String]): Option[FlightRecord] =
     Try {
       FlightRecord(
-        flightDate        = LocalDate.parse(cols(0).trim, fmt),
-        month             = cols(1).trim.toInt,
-        dayOfWeek         = cols(2).trim.toInt,
+        month             = cols(0).trim.toInt,
+        dayOfWeek         = cols(1).trim.toInt,
+        flightDate        = LocalDate.parse(cols(2).trim, fmt),
         carrier           = cols(3).trim,
         flightNumber      = cols(4).trim,
         origin            = cols(5).trim,
@@ -100,7 +105,7 @@ object FlightRecord {
         arrTime           = toInt(cols(16)),
         arrDelay          = toDouble(cols(17)),
         arrDel15          = toInt(cols(18)),
-        cancelled         = cols(19).trim == "1",
+        cancelled         = cols(19).trim == "1.00" || cols(19).trim == "1",
         cancellationCode  = cols(20).trim match { case "" => None; case c => Some(c) },
         distance          = cols(21).trim.toDouble,
         carrierDelay      = toDouble(cols(22)),
