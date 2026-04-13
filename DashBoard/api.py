@@ -14,8 +14,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Serve static files
-app.mount("/static", StaticFiles(directory="dashboard/static"), name="static")
+app.mount("/static", StaticFiles(directory="DashBoard/static"), name="static")
 
 DB = {
     "host":     "localhost",
@@ -36,20 +35,33 @@ def query(sql):
 
 @app.get("/")
 def index():
-    return FileResponse("dashboard/static/index.html")
+    return FileResponse("DashBoard/static/index.html")
 
-@app.get("/api/total-flights")
-def total_flights():
-    rows = query("SELECT COALESCE(MAX(total_flights), 0) as total FROM carrier_delay_agg")
-    return {"total": int(rows[0]["total"])}
+@app.get("/api/stats")
+def stats():
+    rows = query("""
+        SELECT
+            ROUND(AVG(avg_arr_delay)::numeric, 2)  as overall_avg_delay,
+            SUM(total_flights)                      as total_flights,
+            SUM(cancellations)                      as total_cancellations,
+            COUNT(DISTINCT carrier)                 as carriers_tracked
+        FROM carrier_delay_agg
+    """)
+    r = rows[0] if rows else {}
+    return {
+        "overall_avg_delay":   float(r.get("overall_avg_delay",   0) or 0),
+        "total_flights":       int(r.get("total_flights",          0) or 0),
+        "total_cancellations": int(r.get("total_cancellations",    0) or 0),
+        "carriers_tracked":    int(r.get("carriers_tracked",       0) or 0),
+    }
 
 @app.get("/api/carrier-delays")
 def carrier_delays():
     return query("""
         SELECT carrier,
                ROUND(AVG(avg_arr_delay)::numeric, 2) as avg_delay,
-               MAX(total_flights) as total_flights,
-               MAX(cancellations) as cancellations
+               SUM(total_flights) as total_flights,
+               SUM(cancellations) as cancellations
         FROM carrier_delay_agg
         GROUP BY carrier
         ORDER BY avg_delay DESC
@@ -61,7 +73,7 @@ def airport_delays():
     return query("""
         SELECT origin,
                ROUND(AVG(avg_arr_delay)::numeric, 2) as avg_delay,
-               MAX(total_flights) as total_flights
+               SUM(total_flights) as total_flights
         FROM airport_delay_agg
         GROUP BY origin
         ORDER BY avg_delay DESC
@@ -86,20 +98,27 @@ def delay_causes():
         {"cause": "Late Aircraft", "minutes": float(r.get("late_aircraft", 0) or 0)},
     ]
 
-@app.get("/api/stats")
-def stats():
-    rows = query("""
-        SELECT
-            ROUND(AVG(avg_arr_delay)::numeric, 2)  as overall_avg_delay,
-            SUM(total_flights)                      as total_flights,
-            SUM(cancellations)                      as total_cancellations,
-            COUNT(DISTINCT carrier)                 as carriers_tracked
-        FROM carrier_delay_agg
-    """)
-    r = rows[0] if rows else {}
-    return {
-        "overall_avg_delay":   float(r.get("overall_avg_delay",   0) or 0),
-        "total_flights":       int(r.get("total_flights",          0) or 0),
-        "total_cancellations": int(r.get("total_cancellations",    0) or 0),
-        "carriers_tracked":    int(r.get("carriers_tracked",       0) or 0),
-    }
+@app.get("/api/ml-stats")
+def ml_stats():
+    try:
+        rows = query("SELECT * FROM ml_results ORDER BY created_at DESC LIMIT 1")
+        if not rows:
+            return {"status": "not_trained"}
+        r = rows[0]
+        return {
+            "status":        "trained",
+            "r2":            float(r.get("r2",            0) or 0),
+            "mae":           float(r.get("mae",           0) or 0),
+            "rmse":          float(r.get("rmse",          0) or 0),
+            "total_records": int(r.get("total_records",   0) or 0),
+            "top_feature":   r.get("top_feature", "depDelay")
+        }
+    except:
+        return {"status": "not_trained"}
+
+@app.get("/api/feature-importance")
+def feature_importance():
+    try:
+        return query("SELECT feature_name, importance FROM ml_feature_importance ORDER BY importance DESC LIMIT 8")
+    except:
+        return []
