@@ -1,6 +1,5 @@
 -- Auto-runs when PostgreSQL container starts for the first time
 
--- Table 1: Average delay per carrier per 5-min window
 CREATE TABLE IF NOT EXISTS carrier_delay_agg (
     window_start        TIMESTAMP,
     window_end          TIMESTAMP,
@@ -14,7 +13,6 @@ CREATE TABLE IF NOT EXISTS carrier_delay_agg (
     PRIMARY KEY (window_start, carrier)
 );
 
--- Table 2: Average delay per origin airport per 15-min window
 CREATE TABLE IF NOT EXISTS airport_delay_agg (
     window_start    TIMESTAMP,
     window_end      TIMESTAMP,
@@ -25,7 +23,6 @@ CREATE TABLE IF NOT EXISTS airport_delay_agg (
     PRIMARY KEY (window_start, origin)
 );
 
--- Table 3: Delay cause breakdown per 5-min window
 CREATE TABLE IF NOT EXISTS delay_cause_agg (
     window_start            TIMESTAMP PRIMARY KEY,
     window_end              TIMESTAMP,

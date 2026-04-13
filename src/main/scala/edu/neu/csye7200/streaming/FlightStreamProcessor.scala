@@ -12,7 +12,6 @@ object FlightStreamProcessor {
   val POSTGRES_USER = "flightuser"
   val POSTGRES_PASS = "flightpass"
 
-  // JSON schema matching FlightProducer output
   val schema: StructType = StructType(Seq(
     StructField("flightDate",        StringType,  nullable = true),
     StructField("month",             IntegerType, nullable = true),
@@ -36,18 +35,41 @@ object FlightStreamProcessor {
     StructField("lateAircraftDelay", DoubleType,  nullable = true)
   ))
 
-  // Write a batch DataFrame to PostgreSQL using upsert to avoid duplicate key errors
-  def writeToPostgres(df: org.apache.spark.sql.DataFrame, table: String): Unit =
+  def writeToPostgres(df: org.apache.spark.sql.DataFrame, table: String, conflictCols: String): Unit =
     if (!df.isEmpty) {
+      // Write to a temp table first then upsert into main table
+      val tmpTable = s"${table}_tmp"
       df.write
         .format("jdbc")
         .option("url",      POSTGRES_URL)
-        .option("dbtable",  table)
+        .option("dbtable",  tmpTable)
         .option("user",     POSTGRES_USER)
         .option("password", POSTGRES_PASS)
         .option("driver",   "org.postgresql.Driver")
         .mode("overwrite")
         .save()
+
+      // Upsert from temp to main table
+      val cols = df.columns.mkString(", ")
+      val updateCols = df.columns
+        .filterNot(conflictCols.split(",").map(_.trim).contains)
+        .map(c => s"$c = EXCLUDED.$c")
+        .mkString(", ")
+
+      val upsertSQL =
+        s"""INSERT INTO $table ($cols)
+           |SELECT $cols FROM $tmpTable
+           |ON CONFLICT ($conflictCols) DO UPDATE SET $updateCols;
+           |DROP TABLE IF EXISTS $tmpTable;""".stripMargin
+
+      val conn = java.sql.DriverManager.getConnection(POSTGRES_URL, POSTGRES_USER, POSTGRES_PASS)
+      try {
+        val stmt = conn.createStatement()
+        upsertSQL.split(";").map(_.trim).filter(_.nonEmpty).foreach(stmt.execute)
+        stmt.close()
+      } finally {
+        conn.close()
+      }
     }
 
   def main(args: Array[String]): Unit = {
@@ -69,18 +91,18 @@ object FlightStreamProcessor {
       .option("startingOffsets", "earliest")
       .load()
 
-    // Parse JSON
+    // Parse JSON and add processing time (not event time)
+    // Using processingTime avoids watermark issues with historical data
     val flightStream = rawStream
       .select(from_json(col("value").cast("string"), schema).as("data"))
       .select("data.*")
-      .withColumn("eventTime", to_timestamp(col("flightDate"), "yyyy-MM-dd"))
+      .withColumn("processingTime", current_timestamp())
 
     // -------------------------------------------------------------------
     // Aggregation 1: Avg delay per carrier — 5 min tumbling window
     // -------------------------------------------------------------------
     val carrierAgg = flightStream
-      .withWatermark("eventTime", "10 minutes")
-      .groupBy(window(col("eventTime"), "5 minutes"), col("carrier"))
+      .groupBy(window(col("processingTime"), "5 minutes"), col("carrier"))
       .agg(
         round(avg("arrDelay"), 2).as("avg_arr_delay"),
         round(avg("depDelay"), 2).as("avg_dep_delay"),
@@ -105,8 +127,7 @@ object FlightStreamProcessor {
     // Aggregation 2: Avg delay per airport — 15 min sliding window
     // -------------------------------------------------------------------
     val airportAgg = flightStream
-      .withWatermark("eventTime", "10 minutes")
-      .groupBy(window(col("eventTime"), "15 minutes", "5 minutes"), col("origin"))
+      .groupBy(window(col("processingTime"), "15 minutes", "5 minutes"), col("origin"))
       .agg(
         round(avg("arrDelay"), 2).as("avg_arr_delay"),
         count("*").as("total_flights"),
@@ -125,8 +146,7 @@ object FlightStreamProcessor {
     // Aggregation 3: Delay cause breakdown — 5 min tumbling window
     // -------------------------------------------------------------------
     val causeAgg = flightStream
-      .withWatermark("eventTime", "10 minutes")
-      .groupBy(window(col("eventTime"), "5 minutes"))
+      .groupBy(window(col("processingTime"), "5 minutes"))
       .agg(
         round(avg("carrierDelay"), 2).as("avg_carrier_delay"),
         round(avg("weatherDelay"), 2).as("avg_weather_delay"),
@@ -152,7 +172,7 @@ object FlightStreamProcessor {
       .foreachBatch { (df: org.apache.spark.sql.DataFrame, id: Long) =>
         println(s"[Carrier Agg] Batch $id")
         df.show(truncate = false)
-        writeToPostgres(df, "carrier_delay_agg")
+        writeToPostgres(df, "carrier_delay_agg", "window_start, carrier")
       }
       .option("checkpointLocation", "checkpoints/carrier")
       .queryName("carrier_agg")
@@ -163,7 +183,7 @@ object FlightStreamProcessor {
       .foreachBatch { (df: org.apache.spark.sql.DataFrame, id: Long) =>
         println(s"[Airport Agg] Batch $id")
         df.show(truncate = false)
-        writeToPostgres(df, "airport_delay_agg")
+        writeToPostgres(df, "airport_delay_agg", "window_start, origin")
       }
       .option("checkpointLocation", "checkpoints/airport")
       .queryName("airport_agg")
@@ -174,7 +194,7 @@ object FlightStreamProcessor {
       .foreachBatch { (df: org.apache.spark.sql.DataFrame, id: Long) =>
         println(s"[Cause Agg] Batch $id")
         df.show(truncate = false)
-        writeToPostgres(df, "delay_cause_agg")
+        writeToPostgres(df, "delay_cause_agg", "window_start")
       }
       .option("checkpointLocation", "checkpoints/delay_cause")
       .queryName("cause_agg")
