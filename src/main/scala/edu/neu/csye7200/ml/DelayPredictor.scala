@@ -15,6 +15,7 @@ object DelayPredictor {
     val spark = SparkSession.builder()
       .appName("FlightDelayPredictor")
       .master("local[*]")
+      .config("spark.serializer", "org.apache.spark.serializer.JavaSerializer")
       .getOrCreate()
 
     spark.sparkContext.setLogLevel("WARN")
@@ -28,20 +29,22 @@ object DelayPredictor {
       .csv(csvPath)
 
     val df = raw.select(
-        col("Reporting_Airline").as("carrier"),
-        col("Origin").as("origin"),
-        col("Dest").as("dest"),
-        col("DayOfWeek").cast("double").as("dayOfWeek"),
-        col("Month").cast("double").as("month"),
-        col("DepDelay").cast("double").as("depDelay"),
-        col("Distance").cast("double").as("distance"),
-        col("WeatherDelay").cast("double").as("weatherDelay"),
-        col("CarrierDelay").cast("double").as("carrierDelay"),
-        col("NASDelay").cast("double").as("nasDelay"),
-        col("ArrDelay").cast("double").as("arrDelay")
+        col("OP_UNIQUE_CARRIER").as("carrier"),
+        col("ORIGIN").as("origin"),
+        col("DEST").as("dest"),
+        col("DAY_OF_WEEK").cast("double").as("dayOfWeek"),
+        col("MONTH").cast("double").as("month"),
+        col("DEP_DELAY").cast("double").as("depDelay"),
+        col("DISTANCE").cast("double").as("distance"),
+        col("WEATHER_DELAY").cast("double").as("weatherDelay"),
+        col("CARRIER_DELAY").cast("double").as("carrierDelay"),
+        col("NAS_DELAY").cast("double").as("nasDelay"),
+        col("ARR_DELAY").cast("double").as("arrDelay")
       )
       .na.fill(0.0, Seq("depDelay", "weatherDelay", "carrierDelay", "nasDelay"))
       .na.drop(Seq("arrDelay"))
+    val sampled = df.sample(0.2, seed = 42)
+
 
     println(s"Records after cleaning: ${df.count()}")
 
@@ -68,6 +71,7 @@ object DelayPredictor {
       .setFeaturesCol("features")
       .setNumTrees(100)
       .setMaxDepth(10)
+      .setMaxBins(400)
       .setSeed(42)
 
     // -------------------------------------------------------------------
@@ -78,7 +82,7 @@ object DelayPredictor {
     // -------------------------------------------------------------------
     // Train / test split
     // -------------------------------------------------------------------
-    val Array(train, test) = df.randomSplit(Array(0.8, 0.2), seed = 42)
+    val Array(train, test) = sampled.randomSplit(Array(0.8, 0.2), seed = 42)
     println(s"Training: ${train.count()} | Test: ${test.count()}")
 
     // -------------------------------------------------------------------
