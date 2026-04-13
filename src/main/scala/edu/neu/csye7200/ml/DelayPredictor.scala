@@ -9,6 +9,10 @@ import org.apache.spark.ml.feature.{StringIndexer, VectorAssembler}
 
 object DelayPredictor {
 
+  val PG_URL  = "jdbc:postgresql://localhost:5432/flightdb"
+  val PG_USER = "flightuser"
+  val PG_PASS = "flightpass"
+
   def main(args: Array[String]): Unit = {
     val csvPath = if (args.nonEmpty) args(0) else "data/flight_data.csv"
 
@@ -20,9 +24,7 @@ object DelayPredictor {
 
     spark.sparkContext.setLogLevel("WARN")
 
-    // -------------------------------------------------------------------
     // Load and clean data
-    // -------------------------------------------------------------------
     val raw = spark.read
       .option("header", "true")
       .option("inferSchema", "true")
@@ -43,29 +45,22 @@ object DelayPredictor {
       )
       .na.fill(0.0, Seq("depDelay", "weatherDelay", "carrierDelay", "nasDelay"))
       .na.drop(Seq("arrDelay"))
+
     val sampled = df.sample(0.2, seed = 42)
-
-
     println(s"Records after cleaning: ${df.count()}")
 
-    // -------------------------------------------------------------------
     // Encode categorical columns
-    // -------------------------------------------------------------------
     val carrierIdx = new StringIndexer().setInputCol("carrier").setOutputCol("carrierIdx").setHandleInvalid("keep")
     val originIdx  = new StringIndexer().setInputCol("origin").setOutputCol("originIdx").setHandleInvalid("keep")
     val destIdx    = new StringIndexer().setInputCol("dest").setOutputCol("destIdx").setHandleInvalid("keep")
 
-    // -------------------------------------------------------------------
-    // Assemble feature vector
-    // -------------------------------------------------------------------
+    // Feature vector
     val assembler = new VectorAssembler()
       .setInputCols(Array("carrierIdx", "originIdx", "destIdx", "dayOfWeek", "month", "depDelay", "distance", "weatherDelay", "carrierDelay", "nasDelay"))
       .setOutputCol("features")
       .setHandleInvalid("skip")
 
-    // -------------------------------------------------------------------
-    // Random Forest model
-    // -------------------------------------------------------------------
+    // Random Forest
     val rf = new RandomForestRegressor()
       .setLabelCol("arrDelay")
       .setFeaturesCol("features")
@@ -74,26 +69,17 @@ object DelayPredictor {
       .setMaxBins(400)
       .setSeed(42)
 
-    // -------------------------------------------------------------------
-    // Pipeline
-    // -------------------------------------------------------------------
     val pipeline = new Pipeline().setStages(Array(carrierIdx, originIdx, destIdx, assembler, rf))
 
-    // -------------------------------------------------------------------
     // Train / test split
-    // -------------------------------------------------------------------
     val Array(train, test) = sampled.randomSplit(Array(0.8, 0.2), seed = 42)
     println(s"Training: ${train.count()} | Test: ${test.count()}")
 
-    // -------------------------------------------------------------------
     // Train
-    // -------------------------------------------------------------------
     println("Training Random Forest...")
     val model = pipeline.fit(train)
 
-    // -------------------------------------------------------------------
     // Evaluate
-    // -------------------------------------------------------------------
     val predictions = model.transform(test)
 
     def eval(metric: String) = new RegressionEvaluator()
@@ -113,28 +99,63 @@ object DelayPredictor {
     println(f"  R²   : $r2%.4f")
     println("=" * 45)
 
-    // -------------------------------------------------------------------
     // Feature importance
-    // -------------------------------------------------------------------
-    val rfModel = model.stages.last.asInstanceOf[RandomForestRegressionModel]
-    val features = Array("carrier", "origin", "dest", "dayOfWeek", "month", "depDelay", "distance", "weatherDelay", "carrierDelay", "nasDelay")
+    val rfModel  = model.stages.last.asInstanceOf[RandomForestRegressionModel]
+    val featNames = Array("carrier", "origin", "dest", "dayOfWeek", "month", "depDelay", "distance", "weatherDelay", "carrierDelay", "nasDelay")
+    val importance = featNames.zip(rfModel.featureImportances.toArray).sortBy(-_._2)
 
     println("\nFeature Importance:")
-    features.zip(rfModel.featureImportances.toArray)
-      .sortBy(-_._2)
-      .foreach { case (name, imp) => println(f"  $name%-20s $imp%.4f") }
+    importance.foreach { case (name, imp) => println(f"  $name%-20s $imp%.4f") }
 
-    // -------------------------------------------------------------------
     // Sample predictions
-    // -------------------------------------------------------------------
     println("\nSample Predictions:")
     predictions.select("carrier", "origin", "dest", "arrDelay", "prediction").show(10, truncate = false)
 
-    // -------------------------------------------------------------------
     // Save model
-    // -------------------------------------------------------------------
     model.write.overwrite().save("model/random_forest_flight_delay")
     println("Model saved to model/random_forest_flight_delay")
+
+    // -------------------------------------------------------------------
+    // Save ML results to PostgreSQL
+    // -------------------------------------------------------------------
+    println("Saving ML results to PostgreSQL...")
+    val conn = java.sql.DriverManager.getConnection(PG_URL, PG_USER, PG_PASS)
+    try {
+      val stmt = conn.createStatement()
+
+      // Create tables if not exist
+      stmt.execute("""
+        CREATE TABLE IF NOT EXISTS ml_results (
+          id SERIAL PRIMARY KEY,
+          r2 NUMERIC(6,4), mae NUMERIC(8,2), rmse NUMERIC(8,2),
+          total_records BIGINT, top_feature VARCHAR(50),
+          created_at TIMESTAMP DEFAULT NOW()
+        )
+      """)
+      stmt.execute("""
+        CREATE TABLE IF NOT EXISTS ml_feature_importance (
+          feature_name VARCHAR(50) PRIMARY KEY,
+          importance NUMERIC(10,6)
+        )
+      """)
+
+      // Save metrics
+      val topFeature = importance.head._1
+      stmt.execute(s"INSERT INTO ml_results (r2, mae, rmse, total_records, top_feature) VALUES ($r2, $mae, $rmse, ${df.count()}, '$topFeature')")
+
+      // Save feature importance
+      importance.foreach { case (name, imp) =>
+        stmt.execute(s"""
+          INSERT INTO ml_feature_importance (feature_name, importance)
+          VALUES ('$name', $imp)
+          ON CONFLICT (feature_name) DO UPDATE SET importance = $imp
+        """)
+      }
+      stmt.close()
+      println("✅ ML results saved to PostgreSQL!")
+    } finally {
+      conn.close()
+    }
 
     spark.stop()
   }
