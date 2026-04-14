@@ -111,28 +111,3 @@ def predictions():
         """)
     except:
         return []
-
-@app.get("/api/ml-stats")
-def ml_stats():
-    try:
-        rows = query("SELECT * FROM ml_results ORDER BY created_at DESC LIMIT 1")
-        if not rows:
-            return {"status": "not_trained"}
-        r = rows[0]
-        return {
-            "status":        "trained",
-            "r2":            float(r.get("r2",            0) or 0),
-            "mae":           float(r.get("mae",           0) or 0),
-            "rmse":          float(r.get("rmse",          0) or 0),
-            "total_records": int(r.get("total_records",   0) or 0),
-            "top_feature":   r.get("top_feature", "depDelay")
-        }
-    except:
-        return {"status": "not_trained"}
-
-@app.get("/api/feature-importance")
-def feature_importance():
-    try:
-        return query("SELECT feature_name, importance FROM ml_feature_importance ORDER BY importance DESC LIMIT 8")
-    except:
-        return []

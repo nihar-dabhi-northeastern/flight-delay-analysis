@@ -45,9 +45,9 @@ echo "🗑️  Clearing old checkpoints..."
 rm -rf checkpoints/
 echo "✅ Checkpoints cleared!"
 
-# Step 6 - Recreate DB tables with proper primary keys
+# Step 6 - Recreate streaming tables (keep ML tables)
 echo ""
-echo "🗑️  Recreating database tables..."
+echo "🗑️  Recreating streaming tables..."
 sleep 3
 docker exec -i postgres psql -U flightuser -d flightdb -c "
 DROP TABLE IF EXISTS carrier_delay_agg;
@@ -67,8 +67,19 @@ CREATE TABLE delay_cause_agg (
     window_start TIMESTAMP PRIMARY KEY, window_end TIMESTAMP,
     avg_carrier_delay NUMERIC(8,2), avg_weather_delay NUMERIC(8,2),
     avg_nas_delay NUMERIC(8,2), avg_security_delay NUMERIC(8,2),
-    avg_late_aircraft_delay NUMERIC(8,2));" 2>/dev/null
-echo "✅ Database tables recreated with primary keys!"
+    avg_late_aircraft_delay NUMERIC(8,2));
+CREATE TABLE IF NOT EXISTS ml_results (
+    id SERIAL PRIMARY KEY, r2 NUMERIC(6,4), mae NUMERIC(8,2),
+    rmse NUMERIC(8,2), total_records BIGINT, top_feature VARCHAR(50),
+    created_at TIMESTAMP DEFAULT NOW());
+CREATE TABLE IF NOT EXISTS ml_feature_importance (
+    feature_name VARCHAR(50) PRIMARY KEY, importance NUMERIC(10,6));
+CREATE TABLE IF NOT EXISTS flight_predictions (
+    id SERIAL PRIMARY KEY, carrier VARCHAR(10), flight_number VARCHAR(10),
+    origin VARCHAR(10), dest VARCHAR(10), dep_delay NUMERIC(8,2),
+    actual_delay NUMERIC(8,2), predicted_delay NUMERIC(8,2),
+    processed_at TIMESTAMP DEFAULT NOW());" 2>/dev/null
+echo "✅ Tables ready!"
 
 # Done
 echo ""
