@@ -307,6 +307,87 @@
       </table>
     </div>
 
+    <!-- Live Predictions Table -->
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-head">
+        <div>
+          <div class="card-title">⚡ Live Flight Delay Predictions</div>
+          <div class="card-desc">Real-time predictions using Random Forest model</div>
+        </div>
+        <div style="font-size:11px;font-weight:600;padding:4px 10px;border-radius:6px;border:1px solid #bfdbfe;background:#eff6ff;color:#2563eb">ML Powered</div>
+      </div>
+      <table>
+        <thead>
+        <tr>
+          <th>Flight</th>
+          <th>Route</th>
+          <th>Dep Delay</th>
+          <th>Predicted</th>
+          <th>Actual</th>
+          <th>Accuracy</th>
+        </tr>
+        </thead>
+        <tbody id="predictionsTable">
+        <tr><td colspan="6" style="text-align:center;color:#94a3b8;padding:24px">
+          Run DelayPredictor first to enable predictions...
+        </td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- ML Model Section -->
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-head">
+        <div>
+          <div class="card-title">🤖 Random Forest Model — Delay Prediction</div>
+          <div class="card-desc">Trained on 584K flight records · Spark MLlib</div>
+        </div>
+        <div id="mlStatus" style="font-size:11px;font-weight:600;padding:4px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--muted)">Not Trained</div>
+      </div>
+
+      <!-- ML KPIs -->
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px">
+        <div class="kpi">
+          <div class="kpi-header">
+            <div class="kpi-label">R² Score</div>
+            <div class="kpi-icon" style="background:#eff6ff">🎯</div>
+          </div>
+          <div class="kpi-value" id="mlR2" style="color:#2563eb">—</div>
+          <div class="kpi-trend">Model accuracy</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-header">
+            <div class="kpi-label">MAE</div>
+            <div class="kpi-icon" style="background:#ecfdf5">📉</div>
+          </div>
+          <div class="kpi-value" id="mlMAE" style="color:#059669">—<span>min</span></div>
+          <div class="kpi-trend">Mean absolute error</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-header">
+            <div class="kpi-label">RMSE</div>
+            <div class="kpi-icon" style="background:#fffbeb">📊</div>
+          </div>
+          <div class="kpi-value" id="mlRMSE" style="color:#d97706">—<span>min</span></div>
+          <div class="kpi-trend">Root mean sq error</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-header">
+            <div class="kpi-label">Top Predictor</div>
+            <div class="kpi-icon" style="background:#f5f3ff">🏆</div>
+          </div>
+          <div class="kpi-value" id="mlTop" style="font-size:18px;color:#7c3aed">—</div>
+          <div class="kpi-trend">Most important feature</div>
+        </div>
+      </div>
+
+      <!-- Feature Importance Chart -->
+      <div>
+        <div class="card-title" style="margin-bottom:14px;font-size:12px">Feature Importance Rankings</div>
+        <div style="position:relative;height:220px"><canvas id="featureChart"></canvas></div>
+      </div>
+    </div>
+
     <!-- Footer -->
     <div class="page-footer">
       <div class="stack-row">
@@ -445,7 +526,29 @@
     } catch(e) { console.error(e); }
   }
 
-  initCharts();
+    window.fChart = new Chart(document.getElementById('featureChart'), {
+      type: 'bar',
+      data: { labels: [], datasets: [{ data: [],
+        backgroundColor: '#c4b5fd', borderRadius: 5, borderSkipped: false,
+      }]},
+      options: {
+        responsive: true, maintainAspectRatio: false, indexAxis: 'y',
+        plugins: { legend: { display: false },
+          tooltip: { backgroundColor:'#fff', titleColor:'#0f172a', bodyColor:'#64748b',
+            borderColor:'#e2e8f0', borderWidth:1, padding:10,
+            callbacks: { label: c => ` ${(c.raw * 100).toFixed(1)}% importance` }
+          }
+        },
+        scales: {
+          x: { grid: { color:'#f1f5f9' }, border: { display:false },
+               ticks: { callback: v => (v*100).toFixed(0)+'%' } },
+          y: { grid: { display:false }, border: { display:false },
+               ticks: { font: { weight:'600' } } }
+        }
+      }
+    });
+
+    initCharts();
   refresh();
   setInterval(refresh, 5000);
 </script>

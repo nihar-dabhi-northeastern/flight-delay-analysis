@@ -98,6 +98,20 @@ def delay_causes():
         {"cause": "Late Aircraft", "minutes": float(r.get("late_aircraft", 0) or 0)},
     ]
 
+@app.get("/api/predictions")
+def predictions():
+    try:
+        return query("""
+            SELECT carrier, flight_number, origin, dest,
+                   dep_delay, actual_delay, predicted_delay,
+                   processed_at
+            FROM flight_predictions
+            ORDER BY processed_at DESC
+            LIMIT 20
+        """)
+    except:
+        return []
+
 @app.get("/api/ml-stats")
 def ml_stats():
     try:
