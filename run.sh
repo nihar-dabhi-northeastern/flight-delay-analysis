@@ -32,20 +32,48 @@ fi
 echo ""
 echo "🐳 Starting Docker containers..."
 docker-compose up -d
-sleep 5
+
+# Wait for PostgreSQL to be ready
+echo "⏳ Waiting for PostgreSQL to be ready..."
+until docker exec postgres pg_isready -U flightuser -d flightdb > /dev/null 2>&1; do
+  sleep 2
+  echo "   PostgreSQL not ready yet..."
+done
+echo "✅ PostgreSQL is ready!"
 
 # Step 4 - Verify containers
 echo ""
 echo "📦 Running containers:"
 docker ps --format "  ✅ {{.Names}} ({{.Status}})"
 
-# Step 5 - Clear checkpoints
+# Step 5 - Wait for Kafka to be fully ready
+echo ""
+echo "⏳ Waiting for Kafka to be ready..."
+until docker exec kafka bash -c "echo > /dev/tcp/localhost/9092" > /dev/null 2>&1; do
+  sleep 2
+  echo "   Kafka not ready yet..."
+done
+echo "✅ Kafka is ready!"
+
+# Step 6 - Create Kafka topic if it doesn't exist
+echo ""
+echo "📨 Creating Kafka topic 'flight-events'..."
+docker exec kafka kafka-topics \
+  --bootstrap-server localhost:9092 \
+  --create \
+  --if-not-exists \
+  --topic flight-events \
+  --partitions 3 \
+  --replication-factor 1
+echo "✅ Kafka topic ready!"
+
+# Step 7 - Clear checkpoints
 echo ""
 echo "🗑️  Clearing old checkpoints..."
 rm -rf checkpoints/
 echo "✅ Checkpoints cleared!"
 
-# Step 6 - Recreate streaming tables (keep ML tables)
+# Step 8 - Recreate streaming tables (keep ML tables)
 echo ""
 echo "🗑️  Recreating streaming tables..."
 sleep 3
@@ -81,20 +109,37 @@ CREATE TABLE IF NOT EXISTS flight_predictions (
     processed_at TIMESTAMP DEFAULT NOW());" 2>/dev/null
 echo "✅ Tables ready!"
 
-# Done
+# Step 9 - Start Spark Streaming in background
+echo ""
+echo "🔥 Starting Spark Streaming Consumer..."
+sbt "runMain edu.neu.csye7200.streaming.FlightStreamProcessor" > /dev/null 2>&1 &
+SPARK_PID=$!
+echo "✅ Spark started (PID $SPARK_PID)"
+sleep 15
+
+# Step 10 - Start Kafka Producer in background
+echo ""
+echo "📨 Starting Kafka Producer..."
+sbt "runMain edu.neu.csye7200.producer.FlightProducer data/flight_data.csv" > /dev/null 2>&1 &
+PRODUCER_PID=$!
+echo "✅ Producer started (PID $PRODUCER_PID)"
+sleep 3
+
+# Step 11 - Start FastAPI Dashboard
+echo ""
+echo "🌐 Starting Dashboard API..."
+uvicorn DashBoard.api:app --reload --port 8000 > /dev/null 2>&1 &
+API_PID=$!
+echo "✅ API started (PID $API_PID) — logs/api.log"
+sleep 2
+
 echo ""
 echo "============================================"
-echo "✅ Setup complete! Now run in 3 terminals:"
+echo "✅ Everything is running!"
 echo "============================================"
 echo ""
-echo "  Terminal 1 — Spark Streaming:"
-echo "  sbt \"runMain edu.neu.csye7200.streaming.FlightStreamProcessor\""
+echo "  🌐 Dashboard : http://localhost:8000"
 echo ""
-echo "  Terminal 2 — Kafka Producer:"
-echo "  sbt \"runMain edu.neu.csye7200.producer.FlightProducer\""
-echo ""
-echo "  Terminal 3 — Dashboard API:"
-echo "  uvicorn DashBoard.api:app --reload --port 8000"
-echo ""
-echo "  Browser: http://localhost:8000"
+echo "  To stop everything:"
+echo "  kill $SPARK_PID $PRODUCER_PID $API_PID && docker-compose down"
 echo ""
