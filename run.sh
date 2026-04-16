@@ -67,20 +67,20 @@ docker exec kafka kafka-topics \
   --replication-factor 1
 echo "✅ Kafka topic ready!"
 
-# Step 7 - Clear checkpoints
+# Step 7 - Clear checkpoints for fresh start
 echo ""
 echo "🗑️  Clearing old checkpoints..."
 rm -rf checkpoints/
 echo "✅ Checkpoints cleared!"
 
-# Step 8 - Recreate streaming tables (keep ML tables)
+# Step 8 - Recreate ALL tables from scratch
 echo ""
-echo "🗑️  Recreating streaming tables..."
-sleep 3
+echo "🗑️  Recreating all tables from scratch..."
 docker exec -i postgres psql -U flightuser -d flightdb -c "
 DROP TABLE IF EXISTS carrier_delay_agg;
 DROP TABLE IF EXISTS airport_delay_agg;
 DROP TABLE IF EXISTS delay_cause_agg;
+DROP TABLE IF EXISTS flight_predictions;
 CREATE TABLE carrier_delay_agg (
     window_start TIMESTAMP, window_end TIMESTAMP, carrier VARCHAR(10),
     avg_arr_delay NUMERIC(8,2), avg_dep_delay NUMERIC(8,2),
@@ -102,14 +102,14 @@ CREATE TABLE IF NOT EXISTS ml_results (
     created_at TIMESTAMP DEFAULT NOW());
 CREATE TABLE IF NOT EXISTS ml_feature_importance (
     feature_name VARCHAR(50) PRIMARY KEY, importance NUMERIC(10,6));
-CREATE TABLE IF NOT EXISTS flight_predictions (
+CREATE TABLE flight_predictions (
     id SERIAL PRIMARY KEY, carrier VARCHAR(10), flight_number VARCHAR(10),
     origin VARCHAR(10), dest VARCHAR(10), dep_delay NUMERIC(8,2),
     actual_delay NUMERIC(8,2), predicted_delay NUMERIC(8,2),
     processed_at TIMESTAMP DEFAULT NOW());" 2>/dev/null
-echo "✅ Tables ready!"
+echo "✅ All tables ready — fresh start!"
 
-# Step 9 - Start Spark Streaming in background
+# Step 9 - Start Spark Streaming Consumer in background
 echo ""
 echo "🔥 Starting Spark Streaming Consumer..."
 sbt "runMain edu.neu.csye7200.streaming.FlightStreamProcessor" > /dev/null 2>&1 &
@@ -130,7 +130,7 @@ echo ""
 echo "🌐 Starting Dashboard API..."
 uvicorn DashBoard.api:app --reload --port 8000 > /dev/null 2>&1 &
 API_PID=$!
-echo "✅ API started (PID $API_PID) — logs/api.log"
+echo "✅ API started (PID $API_PID)"
 sleep 2
 
 echo ""
