@@ -55,17 +55,21 @@ until docker exec kafka bash -c "echo > /dev/tcp/localhost/9092" > /dev/null 2>&
 done
 echo "✅ Kafka is ready!"
 
-# Step 6 - Create Kafka topic if it doesn't exist
+# Step 6 - Delete and recreate Kafka topic for fresh start
 echo ""
-echo "📨 Creating Kafka topic 'flight-events'..."
+echo "📨 Resetting Kafka topic 'flight-events'..."
+docker exec kafka kafka-topics \
+  --bootstrap-server localhost:9092 \
+  --delete \
+  --topic flight-events 2>/dev/null
+sleep 3
 docker exec kafka kafka-topics \
   --bootstrap-server localhost:9092 \
   --create \
-  --if-not-exists \
   --topic flight-events \
   --partitions 3 \
   --replication-factor 1
-echo "✅ Kafka topic ready!"
+echo "✅ Kafka topic reset — fresh start!"
 
 # Step 7 - Clear checkpoints for fresh start
 echo ""
